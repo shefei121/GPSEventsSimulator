@@ -10,18 +10,6 @@ using static SimGpsDataUpload.Form1;
 
 namespace SimGpsDataUpload
 {
-	public enum TimeStrategy
-	{
-		KeepOriginal,
-		Speedup
-	}
-
-	public enum BatchType
-	{
-		CreateTime,
-		StartTime
-	}
-
 	public class GpsDeviceSimulator
 	{
 		private TimeSpan _timeSpan;
@@ -29,11 +17,11 @@ namespace SimGpsDataUpload
 		private string _connectionString;
 		private Timer _saveGpsDataTimer;
 		private List<int> _vendorEventTypeIds = new List<int>();
+
 		public event EventHandler<EventArgs> OnComplete;
-		public int SkipRecord { get; set; } = 0;
-		public int Interval { get; set; } = 2000;
-		public TimeStrategy TimeStrategy { get; set; }
-		public BatchType BatchType { get; set; }
+
+		public SimulatorSettings Settings { get; set; }
+
 		public Logger Logger { get; set; }
 
 		public void LoadData(string xmlFileName)
@@ -43,18 +31,23 @@ namespace SimGpsDataUpload
 
 			IEnumerable<dynamic> vechileEvents = rows.row;
 			var orderedByStartTime = vechileEvents.OrderBy(vehicleEvent => DateTime.Parse(vehicleEvent.StartTime)).ToList();
-			orderedByStartTime.RemoveRange(0, SkipRecord);
+			orderedByStartTime.RemoveRange(0, Settings.SkipRecord);
 			var firstRow = orderedByStartTime[0];
 			_timeSpan = DateTime.Now - DateTime.Parse(firstRow.StartTime).ToLocalTime() + TimeSpan.FromSeconds(5);
 
-			var gpsData = orderedByStartTime.OrderBy(vehicleEvent => int.Parse(vehicleEvent.RowID)).ToList();
+			var gpsData = orderedByStartTime;
+			if (Settings.GpsDataSortBy == GpsDataSortBy.StartTime)
+			{
+				gpsData = orderedByStartTime.OrderBy(vehicleEvent => int.Parse(vehicleEvent.RowID)).ToList();
+			}
+
 			var gpsDataList = new List<dynamic>();
 			DateTime compareTime;
-			var startTime = BatchType == BatchType.CreateTime ? DateTime.Parse(gpsData[0].CreateDateTime) : DateTime.Parse(gpsData[0].StartTime);
+			var startTime = Settings.BatchType == BatchType.CreateTime ? DateTime.Parse(gpsData[0].CreateDateTime) : DateTime.Parse(gpsData[0].StartTime);
 			var endTime = startTime + TimeSpan.FromSeconds(30);
 			foreach (var data in gpsData)
 			{
-				compareTime = BatchType == BatchType.CreateTime ? DateTime.Parse(data.CreateDateTime) : DateTime.Parse(data.StartTime);
+				compareTime = Settings.BatchType == BatchType.CreateTime ? DateTime.Parse(data.CreateDateTime) : DateTime.Parse(data.StartTime);
 				if (compareTime >= startTime && compareTime <= endTime)
 				{
 					gpsDataList.Add(data);
@@ -64,7 +57,7 @@ namespace SimGpsDataUpload
 				_pendingGpsDataQueue.Enqueue(gpsDataList);
 				gpsDataList = new List<dynamic>();
 				gpsDataList.Add(data);
-				startTime = BatchType == BatchType.CreateTime ? DateTime.Parse(data.CreateDateTime) : DateTime.Parse(data.StartTime);
+				startTime = Settings.BatchType == BatchType.CreateTime ? DateTime.Parse(data.CreateDateTime) : DateTime.Parse(data.StartTime);
 				//startTime = DateTime.Parse(data.CreateDateTime);
 				endTime = startTime + TimeSpan.FromSeconds(30);
 			}
@@ -98,13 +91,9 @@ namespace SimGpsDataUpload
 
 			_eventType = "90";//power on
 			_lastTime = DateTime.Now;
-			//while (_pendingGpsDataQueue.Count > 0)
-			//{
-			//	SaveGpsData();
-			//}
 
 			_saveGpsDataTimer = new Timer();
-			_saveGpsDataTimer.Interval = Interval;
+			_saveGpsDataTimer.Interval = Settings.Interval;
 			_saveGpsDataTimer.Elapsed += SaveDataTimer_Elapsed;
 			_saveGpsDataTimer.Start();
 
@@ -155,7 +144,7 @@ namespace SimGpsDataUpload
 					_eventType = "1";//gps location
 				}
 
-				Logger.WriteLine($"Batch completed.  Next batch will be started after {Interval / 1000} seconds.");
+				Logger.WriteLine($"Batch completed.  Next batch will be started after {Settings.Interval / 1000} seconds.");
 				//using (var conn = new SqlConnection(_connectionString))
 				//using (var cmd = new SqlCommand())
 				//{
@@ -230,11 +219,11 @@ namespace SimGpsDataUpload
 		private object UpdateTime(dynamic time)
 		{
 			//return UpdateTimeRandom(time);
-			if (TimeStrategy == TimeStrategy.KeepOriginal)
+			if (Settings.TimeStrategy == TimeStrategy.KeepOriginal)
 			{
 				return UpdateTimeKeepOriginal(time);
 			}
-			else if (TimeStrategy == TimeStrategy.Speedup)
+			else if (Settings.TimeStrategy == TimeStrategy.Speedup)
 			{
 				return UpdateTimeSpeedup(time);
 			}

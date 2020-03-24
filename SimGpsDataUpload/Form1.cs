@@ -10,6 +10,7 @@ using System.IO.IsolatedStorage;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Runtime.Serialization.Formatters.Binary;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
@@ -21,7 +22,7 @@ namespace SimGpsDataUpload
 {
 	public partial class Form1 : Form
 	{
-
+		private SimulatorSettings _settings = new SimulatorSettings();
 		private Logger _logger;
 		public Form1()
 		{
@@ -60,10 +61,7 @@ namespace SimGpsDataUpload
 
 			var gpsSimulator = new GpsDeviceSimulator();
 			gpsSimulator.Logger = _logger;
-			gpsSimulator.SkipRecord = (int)nudSkip.Value;
-			gpsSimulator.Interval = (int)nudInterval.Value * 1000;
-			gpsSimulator.TimeStrategy = rbKeepOriginal.Checked ? TimeStrategy.KeepOriginal : TimeStrategy.Speedup;
-			gpsSimulator.BatchType = rbCreateTime.Checked ? BatchType.CreateTime : BatchType.StartTime;
+			gpsSimulator.Settings = _settings;
 
 			gpsSimulator.OnComplete += GpsSimulator_OnComplete;
 
@@ -130,12 +128,24 @@ namespace SimGpsDataUpload
 				isoStore.DeleteFile(_settingsFileName);
 			}
 
+			var simulatorSettingsString = string.Empty;
+			using (MemoryStream stream = new MemoryStream())
+			{
+				var formatter = new BinaryFormatter();
+				formatter.Serialize(stream, _settings);
+				stream.Position = 0;
+				byte[] buffer = new byte[stream.Length];
+				stream.Read(buffer, 0, buffer.Length);
+				simulatorSettingsString = Convert.ToBase64String(buffer);
+			}
+
 			using (IsolatedStorageFileStream isoStream = new IsolatedStorageFileStream(_settingsFileName, FileMode.CreateNew, isoStore))
 			{
 				using (StreamWriter writer = new StreamWriter(isoStream))
 				{
 					writer.WriteLine($"xmlpath={txtGpsXmlFile.Text}");
 					writer.WriteLine($"connectionstring={txtConnectionString.Text}");
+					writer.WriteLine($"settings={simulatorSettingsString}");
 				}
 			}
 		}
@@ -157,6 +167,16 @@ namespace SimGpsDataUpload
 
 					var connString = reader.ReadLine().Replace("connectionstring=", "");
 					txtConnectionString.Text = connString;
+
+					var simulatorSettingsString = reader.ReadLine().Replace("settings=", "");
+					using (MemoryStream stream = new MemoryStream())
+					{
+						byte[] bytes = Convert.FromBase64String(simulatorSettingsString);
+						stream.Write(bytes, 0, bytes.Length);
+						stream.Position = 0;
+						var formatter = new BinaryFormatter();
+						_settings = (SimulatorSettings)formatter.Deserialize(stream);
+					}
 				}
 			}
 		}
@@ -169,6 +189,11 @@ namespace SimGpsDataUpload
 		private void Form1_Load(object sender, EventArgs e)
 		{
 			LoadSettings();
+		}
+
+		private void btnSettings_Click(object sender, EventArgs e)
+		{
+			new Settings(_settings).ShowDialog();
 		}
 	}
 }
